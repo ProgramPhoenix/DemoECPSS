@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  ecpss-demo:
+    image: ghcr.io/programphoenix/ecpss-demo:latest
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    container_name: ecpss-demo
+    networks:
+      - ecpss-network
+
+networks:
+  ecpss-network:
+    driver: bridge
