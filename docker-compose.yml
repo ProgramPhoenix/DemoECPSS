@@ -10,6 +10,3 @@ services:
     networks:
       - ecpss-network
 
-networks:
-  ecpss-network:
-    driver: bridge
