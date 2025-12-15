@@ -109,8 +109,6 @@ async function revealSecret() {
   originalSecret.value = ''
   timeRemaining.value = totalTime
   keepAliveFlag = false
-  
-  addLog('Secret revealed due to timeout', 'warning')
 }
 
 onUnmounted(() => {
