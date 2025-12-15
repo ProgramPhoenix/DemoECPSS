@@ -9,6 +9,7 @@ const originalSecret = ref('')
 const timeRemaining = ref(10) // seconds
 const totalTime = 10
 let intervalId: number | null = null
+let keepAliveFlag = false
 
 // Terminal console reference
 const terminalRef = ref<InstanceType<typeof TerminalConsole> | null>(null)
@@ -64,8 +65,8 @@ async function encryptSecret() {
 }
 
 async function keepAlive() {
-  timeRemaining.value = totalTime
-  await ecpss.keepAlive()
+  keepAliveFlag = true
+  addLog('Keep-Alive flag set', 'info')
 }
 
 function startTimer() {
@@ -76,14 +77,23 @@ function startTimer() {
   intervalId = window.setInterval(() => {
     timeRemaining.value--
     
-    if (timeRemaining.value <= 5 && timeRemaining.value > 0) {
-      addLog(`Warning: ${timeRemaining.value} seconds remaining`, 'warning')
-    }
-    
     if (timeRemaining.value <= 0) {
-      revealSecret()
+      handleTimerExpiry()
     }
   }, 1000)
+}
+
+async function handleTimerExpiry() {
+  if (keepAliveFlag) {
+    // Keep-alive was pressed, start new epoch
+    keepAliveFlag = false
+    timeRemaining.value = totalTime
+    await ecpss.keepAlive()
+    addLog('New epoch started', 'success')
+  } else {
+    // No keep-alive, reveal secret
+    await revealSecret()
+  }
 }
 
 async function revealSecret() {
@@ -98,6 +108,7 @@ async function revealSecret() {
   isEncrypted.value = false
   originalSecret.value = ''
   timeRemaining.value = totalTime
+  keepAliveFlag = false
   
   addLog('Secret revealed due to timeout', 'warning')
 }

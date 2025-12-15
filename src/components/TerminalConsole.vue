@@ -40,6 +40,7 @@ defineExpose({
   clearLogs
 })
 </script>
+<!--- scrollable machen-->
 
 <template>
   <div class="w-1/2 h-screen overflow-hidden relative z-10">
@@ -62,7 +63,7 @@ defineExpose({
                   rgba(0, 0, 0, 0) 100%);">
       </div>
       
-      <div class="space-y-1 relative z-0 font-mono text-xs sm:text-sm p-4 pb-6 flex flex-col-reverse overflow-hidden" style="max-height: 100%;">
+      <div class="space-y-1 relative z-0 font-mono text-xs sm:text-sm p-4 pb-6 flex flex-col-reverse overflow-y-auto" style="max-height: 100%;">
         <div 
           v-for="(log, index) in logs.slice().reverse()" 
           :key="logs.length - 1 - index"

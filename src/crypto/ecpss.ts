@@ -3,143 +3,258 @@
  * Simulation of the protocol flow
  */
 
-export interface Committee {
-  id: number
-  members: number[]
-  epoch: number
-}
-
 export interface Share {
-  committeeId: number
   shareIndex: number
   value: string
 }
 
 export type LogCallback = (message: string, type: 'info' | 'success' | 'warning' | 'error') => void
 
+export class Node {
+  id: number
+  name: string
+  private randomValue: number = 0
+  private isHolding: boolean = false
+  private nominatedNode: number | null = null
+  private share: Share | null = null
+  private logCallback: LogCallback
+
+  constructor(id: number, logCallback: LogCallback) {
+    this.id = id
+    this.name = `Node ${id}`
+    this.logCallback = logCallback
+  }
+
+  /**
+   * Generate a random value for committee election
+   */
+  generateRandomValue(): number {
+    this.randomValue = Math.random()
+    return this.randomValue
+  }
+
+  /**
+   * Get the current random value
+   */
+  getRandomValue(): number {
+    return this.randomValue
+  }
+
+  /**
+   * Set this node as part of holding committee
+   */
+  setAsHolding(): void {
+    this.isHolding = true
+  }
+
+  /**
+   * Check if this node should be in nominating committee and nominate a holding member
+   * Returns the nominated node ID if this node is in nominating committee, null otherwise
+   */
+  checkAndNominate(allValues: number[], nominatingSize: number, availableNodes: number[]): number | null {
+    // Sort all values to find the threshold
+    const sortedValues = [...allValues].sort((a, b) => a - b)
+    const threshold = sortedValues[nominatingSize - 1]!
+    
+    // Check if this node is nominating
+    if (this.randomValue <= threshold) {
+      // Select a holding member
+      const candidates = availableNodes.filter(nodeId => nodeId !== this.id)
+      const randomIndex = Math.floor(Math.random() * candidates.length)
+      const selected = candidates[randomIndex] ?? this.id
+      
+      this.nominatedNode = selected
+      this.log(`Node ${this.id} nominates Node ${selected} for holding committee`, 'info')
+      
+      return selected
+    }
+    
+    return null
+  }
+
+  /**
+   * Receive a share
+   */
+  receiveShare(share: Share): void {
+    this.share = share
+  }
+
+  /**
+   * Get the share held by this node
+   */
+  getShare(): Share | null {
+    return this.share
+  }
+
+  /**
+   * Check if this node is in holding committee
+   */
+  isInHoldingCommittee(): boolean {
+    return this.isHolding
+  }
+
+  /**
+   * Get nominated node ID
+   */
+  getNominatedNode(): number | null {
+    return this.nominatedNode
+  }
+
+  /**
+   * Reset node to idle state
+   */
+  reset(): void {
+    this.randomValue = 0
+    this.isHolding = false
+    this.nominatedNode = null
+    this.share = null
+  }
+
+  /**
+   * Helper: Logging with callback
+   */
+  private log(message: string, type: 'info' | 'success' | 'warning' | 'error'): void {
+    this.logCallback(message, type)
+  }
+}
+
 export class ECPSSSimulator {
   private logCallback: LogCallback
-  private committees: Committee[] = []
-  private shares: Share[] = []
+  private nodes: Map<number, Node> = new Map()
   private currentEpoch: number = 0
   private totalNodes: number = 10
-  private committeeSize: number = 5
+  private nominatingSize: number = 5
   private threshold: number = 3
 
   constructor(logCallback: LogCallback) {
     this.logCallback = logCallback
+    this.initializeNodes()
+  }
+
+  /**
+   * Initialize all nodes in the network
+   */
+  private initializeNodes(): void {
+    for (let i = 1; i <= this.totalNodes; i++) {
+      const node = new Node(i, this.logCallback)
+      this.nodes.set(i, node)
+    }
+  }
+
+  /**
+   * Reset all nodes to idle state
+   */
+  private resetAllNodes(): void {
+    for (const node of this.nodes.values()) {
+      node.reset()
+    }
   }
 
   /**
    * Initialize the ECPSS protocol
    */
   async initialize(): Promise<void> {
-    this.log('ECPSS Protocol initialized', 'success')
-    this.log(`Configuration: ${this.totalNodes} nodes, committee size ${this.committeeSize}, threshold ${this.threshold}`, 'info')
+    this.logCallback('ECPSS Protocol initialized', 'success')
+    this.logCallback(`Network: ${this.totalNodes} nodes, nominating committee size ${this.nominatingSize}, threshold ${this.threshold}`, 'info')
   }
 
   /**
-   * Encrypt the secret and create initial shares
+   * Encrypt the secret and start first epoch
    */
   async encryptSecret(_secret: string): Promise<void> {
-    this.log('Encrypting secret...', 'info')
+    this.logCallback('Encrypting secret...', 'info')
     
-    // Elect initial committee
-    await this.electCommittee()
+    // Start first epoch
+    await this.startNewEpoch()
     
-    // Distribute shares
-    await this.distributeShares()
-    
-    this.log('Secret encrypted and distributed', 'success')
+    this.logCallback('Secret encrypted and first epoch started', 'success')
   }
 
   /**
-   * Elect a new committee using random selection
+   * Start a new epoch with committee election and share distribution
    */
-  private async electCommittee(): Promise<void> {
+  private async startNewEpoch(): Promise<void> {
     this.currentEpoch++
+    this.resetAllNodes()
     
-    // Simulate random committee selection
-    const members = this.selectRandomNodes(this.committeeSize)
-    const committee: Committee = {
-      id: this.currentEpoch,
-      members,
-      epoch: this.currentEpoch
+    // All nodes generate random values
+    for (const node of this.nodes.values()) {
+      node.generateRandomValue()
     }
     
-    this.committees.push(committee)
+    // Collect all random values (without IDs)
+    const allValues = Array.from(this.nodes.values()).map(node => node.getRandomValue())
     
-    this.log(`Epoch ${this.currentEpoch}: Committee elected [${members.join(', ')}]`, 'success')
+    // Get all available node IDs for selection
+    const availableNodes = Array.from(this.nodes.keys())
+    
+    // Each node checks if it's nominating and nominates a holder
+    const holdingMembers: number[] = []
+    for (const node of this.nodes.values()) {
+      const available = availableNodes.filter(id => !holdingMembers.includes(id))
+      const nominated = node.checkAndNominate(allValues, this.nominatingSize, available)
+      
+      if (nominated !== null) {
+        holdingMembers.push(nominated)
+        const holder = this.nodes.get(nominated)
+        if (holder) holder.setAsHolding()
+      }
+    }
+    
+    this.logCallback(`Holding committee formed: [${holdingMembers.join(', ')}]`, 'success')
+    
+    // Distribute shares to holding committee
+    await this.distributeShares(holdingMembers)
   }
 
   /**
-   * Distribute shares to committee members
+   * Distribute shares to holding committee members
    */
-  private async distributeShares(): Promise<void> {
-    const currentCommittee = this.committees[this.committees.length - 1]
-    if (!currentCommittee) return
-    
-    for (let i = 0; i < currentCommittee.members.length; i++) {
+  private async distributeShares(holders: number[]): Promise<void> {
+    for (let i = 0; i < holders.length; i++) {
+      const holderId = holders[i]!
+      const holder = this.nodes.get(holderId)
+      
+      if (!holder) continue
+      
       const share: Share = {
-        committeeId: currentCommittee.id,
         shareIndex: i,
         value: this.generateMockShare()
       }
       
-      this.shares.push(share)
+      holder.receiveShare(share)
     }
     
-    this.log(`Distributed ${currentCommittee.members.length} shares to committee`, 'info')
+    this.logCallback(`Distributed ${holders.length} shares to holding committee`, 'info')
   }
 
   /**
-   * Perform proactive secret share refresh
-   */
-  async refreshShares(): Promise<void> {
-    this.log('Refreshing shares...', 'info')
-    
-    // Elect new committee
-    await this.electCommittee()
-    
-    // Distribute new shares
-    await this.distributeShares()
-    
-    this.log('Shares refreshed successfully', 'success')
-  }
-
-  /**
-   * Simulate keep-alive signal
+   * Keep alive - starts new epoch (called when timer expires with flag set)
    */
   async keepAlive(): Promise<void> {
-    this.refreshShares();
+    await this.startNewEpoch()
   }
 
   /**
    * Reconstruct secret when timeout occurs
    */
   async reconstructSecret(): Promise<void> {
-    this.currentEpoch = 0;
-    this.log('Timeout - Reconstructing secret...', 'warning')
-    this.log('Secret revealed to all parties', 'warning')
-  }
-
-  /**
-   * Helper: Select random nodes
-   */
-  private selectRandomNodes(count: number): number[] {
-    const nodes: number[] = []
-    const available = Array.from({ length: this.totalNodes }, (_, i) => i + 1)
+    this.logCallback('Timeout - Reconstructing secret...', 'warning')
     
-    for (let i = 0; i < count; i++) {
-      const randomIndex = Math.floor(Math.random() * available.length)
-      const node = available[randomIndex]
-      if (node !== undefined) {
-        nodes.push(node)
-        available.splice(randomIndex, 1)
+    // Gather shares from holding committee nodes
+    const sharesCollected: Share[] = []
+    for (const node of this.nodes.values()) {
+      if (node.isInHoldingCommittee()) {
+        const share = node.getShare()
+        if (share) sharesCollected.push(share)
       }
     }
     
-    return nodes.sort((a, b) => a - b)
+    this.logCallback(`Collected ${sharesCollected.length} shares from holding committee`, 'info')
+    
+    // Reset for next encryption
+    this.currentEpoch = 0
+    this.resetAllNodes()
   }
 
   /**
@@ -152,18 +267,17 @@ export class ECPSSSimulator {
   }
 
   /**
-   * Helper: Logging with callback
+   * Get all nodes
    */
-  private log(message: string, type: 'info' | 'success' | 'warning' | 'error'): void {
-    this.logCallback(message, type)
+  getAllNodes(): Node[] {
+    return Array.from(this.nodes.values())
   }
 
   /**
-   * Get current committee info
+   * Get node by ID
    */
-  getCurrentCommittee(): Committee | null {
-    const committee = this.committees[this.committees.length - 1]
-    return committee ?? null
+  getNode(id: number): Node | undefined {
+    return this.nodes.get(id)
   }
 
   /**
