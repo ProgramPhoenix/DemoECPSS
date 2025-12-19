@@ -5,7 +5,6 @@ import TerminalConsole from './components/TerminalConsole.vue'
 
 const secret = ref('')
 const isEncrypted = ref(false)
-const originalSecret = ref('')
 const timeRemaining = ref(10) // seconds
 const totalTime = 10
 let intervalId: number | null = null
@@ -54,19 +53,21 @@ onMounted(() => {
 async function encryptSecret() {
   if (!secret.value.trim()) return
   
-  originalSecret.value = secret.value
-  secret.value = '*'.repeat(originalSecret.value.length)
+  const secretToEncrypt = secret.value
+  secret.value = '*'.repeat(secretToEncrypt.length)
   isEncrypted.value = true
   timeRemaining.value = totalTime
   
-  await ecpss.encryptSecret(originalSecret.value)
+  await ecpss.encryptSecret(secretToEncrypt)
   
   startTimer()
 }
 
 async function keepAlive() {
-  keepAliveFlag = true
-  addLog('Keep-Alive flag set', 'info')
+  if (!keepAliveFlag) {
+    keepAliveFlag = true
+    addLog('Keep-Alive flag set', 'info')
+  }
 }
 
 function startTimer() {
@@ -102,11 +103,15 @@ async function revealSecret() {
     intervalId = null
   }
   
-  await ecpss.reconstructSecret()
+  const reconstructed = await ecpss.reconstructSecret()
   
-  secret.value = originalSecret.value
+  if (reconstructed) {
+    secret.value = reconstructed
+  } else {
+    secret.value = 'Failed to reconstruct'
+  }
+  
   isEncrypted.value = false
-  originalSecret.value = ''
   timeRemaining.value = totalTime
   keepAliveFlag = false
 }

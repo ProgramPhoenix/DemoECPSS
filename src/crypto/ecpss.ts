@@ -1,12 +1,9 @@
 /**
  * ECPSS - Electing Committees Proactive Secret Sharing
- * Simulation of the protocol flow
+ * Simulation of the protocol flow with Shamir's Secret Sharing
  */
 
-export interface Share {
-  shareIndex: number
-  value: string
-}
+import { type Share, ShamirSecretSharing } from './shamir'
 
 export type LogCallback = (message: string, type: 'info' | 'success' | 'warning' | 'error') => void
 
@@ -14,8 +11,6 @@ export class Node {
   id: number
   name: string
   private randomValue: number = 0
-  private isHolding: boolean = false
-  private nominatedNode: number | null = null
   private share: Share | null = null
   private logCallback: LogCallback
 
@@ -41,13 +36,6 @@ export class Node {
   }
 
   /**
-   * Set this node as part of holding committee
-   */
-  setAsHolding(): void {
-    this.isHolding = true
-  }
-
-  /**
    * Check if this node should be in nominating committee and nominate a holding member
    * Returns the nominated node ID if this node is in nominating committee, null otherwise
    */
@@ -63,7 +51,6 @@ export class Node {
       const randomIndex = Math.floor(Math.random() * candidates.length)
       const selected = candidates[randomIndex] ?? this.id
       
-      this.nominatedNode = selected
       this.log(`Node ${this.id} nominates Node ${selected} for holding committee`, 'info')
       
       return selected
@@ -77,6 +64,7 @@ export class Node {
    */
   receiveShare(share: Share): void {
     this.share = share
+      this.logCallback(`Node ${this.id} received share #${share.x}`, 'info')
   }
 
   /**
@@ -86,18 +74,23 @@ export class Node {
     return this.share
   }
 
-  /**
-   * Check if this node is in holding committee
-   */
-  isInHoldingCommittee(): boolean {
-    return this.isHolding
-  }
+
+
 
   /**
-   * Get nominated node ID
+   * Transfer share to next holding member
+   * @param nextHolder The node that will receive this node's share
+   * @returns true if this node had a share and transferred it, false otherwise
    */
-  getNominatedNode(): number | null {
-    return this.nominatedNode
+  transferShareTo(nextHolder: Node): boolean {
+    if (this.share) {
+      const shareCopy = { ...this.share }
+      this.share = null
+      nextHolder.receiveShare(shareCopy)
+      this.log(`Node ${this.id} -> Node ${nextHolder.id}: Share #${shareCopy.x}`, 'info')
+      return true
+    }
+    return false
   }
 
   /**
@@ -105,8 +98,6 @@ export class Node {
    */
   reset(): void {
     this.randomValue = 0
-    this.isHolding = false
-    this.nominatedNode = null
     this.share = null
   }
 
@@ -161,11 +152,21 @@ export class ECPSSSimulator {
   /**
    * Encrypt the secret and start first epoch
    */
-  async encryptSecret(_secret: string): Promise<void> {
+  async encryptSecret(secret: string): Promise<void> {
     this.logCallback('Encrypting secret...', 'info')
+    this.logCallback(`Using Shamir's Secret Sharing with threshold ${this.threshold}`, 'info')
     
-    // Start first epoch
-    await this.startNewEpoch()
+    // Create shares once using Shamir's Secret Sharing
+    this.logCallback(`Creating ${this.nominatingSize} shares using Shamir's Secret Sharing...`, 'info')
+    const initialShares = ShamirSecretSharing.createShares(
+      secret,
+      this.nominatingSize,
+      this.threshold
+    )
+    this.logCallback(`Created ${initialShares.length} shares (threshold: ${this.threshold})`, 'success')
+    
+    // Start first epoch with initial shares
+    await this.startNewEpoch(initialShares)
     
     this.logCallback('Secret encrypted and first epoch started', 'success')
   }
@@ -173,9 +174,8 @@ export class ECPSSSimulator {
   /**
    * Start a new epoch with committee election and share distribution
    */
-  private async startNewEpoch(): Promise<void> {
+  private async startNewEpoch(initialShares?: Share[]): Promise<void> {
     this.currentEpoch++
-    this.resetAllNodes()
     
     // All nodes generate random values
     for (const node of this.nodes.values()) {
@@ -189,81 +189,124 @@ export class ECPSSSimulator {
     const availableNodes = Array.from(this.nodes.keys())
     
     // Each node checks if it's nominating and nominates a holder
-    const holdingMembers: number[] = []
+    const newHoldingMembers: number[] = []
     for (const node of this.nodes.values()) {
-      const available = availableNodes.filter(id => !holdingMembers.includes(id))
+      const available = availableNodes.filter(id => !newHoldingMembers.includes(id))
       const nominated = node.checkAndNominate(allValues, this.nominatingSize, available)
       
       if (nominated !== null) {
-        holdingMembers.push(nominated)
-        const holder = this.nodes.get(nominated)
-        if (holder) holder.setAsHolding()
+        newHoldingMembers.push(nominated)
       }
     }
     
-    this.logCallback(`Holding committee formed: [${holdingMembers.join(', ')}]`, 'success')
+    this.logCallback(`Epoch ${this.currentEpoch}: New holding committee [${newHoldingMembers.join(', ')}]`, 'success')
     
-    // Distribute shares to holding committee
-    await this.distributeShares(holdingMembers)
+    // Transfer shares from old to new holding committee
+    if (initialShares) {
+      // First epoch: distribute initial shares
+      await this.distributeInitialShares(newHoldingMembers, initialShares)
+    } else {
+      // Subsequent epochs: nodes transfer shares
+      await this.transferShares(newHoldingMembers)
+    }
   }
 
   /**
-   * Distribute shares to holding committee members
+   * Distribute initial shares to first holding committee
    */
-  private async distributeShares(holders: number[]): Promise<void> {
-    for (let i = 0; i < holders.length; i++) {
+  private async distributeInitialShares(holders: number[], shares: Share[]): Promise<void> {
+    for (let i = 0; i < holders.length && i < shares.length; i++) {
       const holderId = holders[i]!
       const holder = this.nodes.get(holderId)
       
       if (!holder) continue
       
-      const share: Share = {
-        shareIndex: i,
-        value: this.generateMockShare()
-      }
-      
-      holder.receiveShare(share)
+      holder.receiveShare(shares[i]!)
     }
     
-    this.logCallback(`Distributed ${holders.length} shares to holding committee`, 'info')
+    this.logCallback(`Initial shares distributed`, 'success')
+  }
+
+  /**
+   * Transfer shares from old to new holding committee
+   */
+  private async transferShares(newHolderIds: number[]): Promise<void> {
+    let transferCount = 0
+    
+    // Save old nodes
+    const oldNodes = new Map(this.nodes)
+    
+    // Create 10 new nodes
+    this.nodes.clear()
+    for (let i = 1; i <= this.totalNodes; i++) {
+      const newNode = new Node(i, this.logCallback)
+      this.nodes.set(i, newNode)
+    }
+    
+    // Transfer shares from old nodes to new holding committee
+    for (const newHolderId of newHolderIds) {
+      const newNode = this.nodes.get(newHolderId)
+      if (!newNode) continue
+      
+      // Find an old node that has a share
+      for (const oldNode of oldNodes.values()) {
+        if (oldNode.transferShareTo(newNode)) {
+          transferCount++
+          break
+        }
+      }
+    }
+    
+    this.logCallback(`${transferCount} shares transferred to new committee`, 'success')
   }
 
   /**
    * Keep alive - starts new epoch (called when timer expires with flag set)
    */
   async keepAlive(): Promise<void> {
+    this.logCallback('Proactive refresh: Re-sharing secret with new committee...', 'info')
     await this.startNewEpoch()
   }
 
   /**
    * Reconstruct secret when timeout occurs
    */
-  async reconstructSecret(): Promise<void> {
+  async reconstructSecret(): Promise<string | null> {
     this.logCallback('Timeout - Reconstructing secret...', 'warning')
     
     // Gather shares from holding committee nodes
     const sharesCollected: Share[] = []
     for (const node of this.nodes.values()) {
-      if (node.isInHoldingCommittee()) {
-        const share = node.getShare()
-        if (share) sharesCollected.push(share)
+      const share = node.getShare()
+      if (share) {
+        sharesCollected.push(share)
+        this.logCallback(`Collected share #${share.x} from Node ${node.id}`, 'info')
       }
     }
     
     this.logCallback(`Collected ${sharesCollected.length} shares from holding committee`, 'info')
     
-    // Reset for next encryption
-    this.currentEpoch = 0
-    this.resetAllNodes()
-  }
-
-  /**
-   * Helper: Generate mock share value
-   */
-  private generateMockShare(): string {
-    return Array.from({ length: 32 }, () => 
-      Math.floor(Math.random() * 16).toString(16)
-    ).join('')
+    // Reconstruct the secret using Shamir's Secret Sharing
+    if (sharesCollected.length >= this.threshold) {
+      const reconstructed = ShamirSecretSharing.reconstructSecret(
+        sharesCollected.slice(0, this.threshold)
+      )
+      this.logCallback(`Secret successfully reconstructed`, 'success')
+      
+      // Reset for next encryption
+      this.currentEpoch = 0
+      this.resetAllNodes()
+      
+      return reconstructed
+    } else {
+      this.logCallback(`Not enough shares (${sharesCollected.length}/${this.threshold})`, 'error')
+      
+      // Reset for next encryption
+      this.currentEpoch = 0
+      this.resetAllNodes()
+      
+      return null
+    }
   }
 
   /**

@@ -40,7 +40,6 @@ defineExpose({
   clearLogs
 })
 </script>
-<!--- scrollable machen-->
 
 <template>
   <div class="w-1/2 h-screen overflow-hidden relative z-10">
