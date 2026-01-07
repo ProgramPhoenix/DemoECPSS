@@ -21,6 +21,68 @@ export class Node {
   }
 
   /**
+   * Create sub-shares for handover protocol (Section 3.1.3)
+   * Creates random polynomial G_j where G_j(0) = current share value
+   * Returns sub-shares for each evaluation point k in [1, numNewSeats]
+   */
+  createSubShares(numNewSeats: number, threshold: number): bigint[] {
+    if (!this.share) {
+      throw new Error('Node has no share to create sub-shares from')
+    }
+
+    // Create random polynomial G_j where G_j(0) = this.share.y
+    const coefficients: bigint[] = [this.share.y]
+    for (let i = 1; i < threshold; i++) {
+      coefficients.push(ShamirSecretSharing.randomCoefficient())
+    }
+
+    // Evaluate polynomial at points 1, 2, ..., numNewSeats
+    const subShares: bigint[] = []
+    for (let k = 1; k <= numNewSeats; k++) {
+      const subShareValue = ShamirSecretSharing.evaluatePolynomial(coefficients, k)
+      subShares.push(subShareValue)
+    }
+
+    return subShares
+  }
+
+  /**
+   * Receive sub-shares and compute new share using Lagrange interpolation
+   * @param seatIndex New seat index (x-coordinate) for this node
+   * @param subShareValues Sub-shares from old committee members
+   * @param oldSeatIndices Original seat indices of old committee members
+   */
+  computeNewShareFromSubShares(
+    seatIndex: number,
+    subShareValues: bigint[],
+    oldSeatIndices: number[]
+  ): void {
+    // Compute new share: Σ λ_j · σ_{j,k} where j are old seat indices
+    let newShareValue = 0n
+
+    for (let j = 0; j < subShareValues.length; j++) {
+      const lambda = ShamirSecretSharing.lagrangeCoefficient(oldSeatIndices, j)
+      const term = (lambda * subShareValues[j]!) % ShamirSecretSharing.PRIME
+      newShareValue = (newShareValue + term) % ShamirSecretSharing.PRIME
+    }
+
+    // Ensure positive
+    if (newShareValue < 0n) {
+      newShareValue = (newShareValue % ShamirSecretSharing.PRIME + ShamirSecretSharing.PRIME) % ShamirSecretSharing.PRIME
+    }
+
+    // Store only the final share (not sub-shares)
+    this.share = {
+      shareIndex: seatIndex - 1,
+      x: seatIndex,
+      y: newShareValue,
+      value: newShareValue.toString(16)
+    }
+
+    this.log(`Computed new share for seat ${seatIndex}`, 'info')
+  }
+
+  /**
    * Generate a random value for committee election
    */
   generateRandomValue(): number {
@@ -228,36 +290,65 @@ export class ECPSSSimulator {
   }
 
   /**
-   * Transfer shares from old to new holding committee
+   * Transfer shares from old to new holding committee using handover protocol (Section 3.1.3)
+   * 
+   * Previous committee members create sub-shares via random polynomials.
+   * New committee members combine sub-shares using Lagrange interpolation.
+   * Only final shares are stored (sub-shares are temporary).
    */
   private async transferShares(newHolderIds: number[]): Promise<void> {
-    let transferCount = 0
+    this.logCallback('Starting handover protocol (Section 3.1.3)...', 'info')
     
-    // Save old nodes
-    const oldNodes = new Map(this.nodes)
+    // Step 1: Collect old nodes with shares
+    const oldNodesWithShares = Array.from(this.nodes.values())
+      .filter(node => node.getShare() !== null)
     
-    // Create 10 new nodes
-    this.nodes.clear()
-    for (let i = 1; i <= this.totalNodes; i++) {
-      const newNode = new Node(i, this.logCallback)
-      this.nodes.set(i, newNode)
+    if (oldNodesWithShares.length === 0) {
+      this.logCallback('No shares to transfer', 'warning')
+      return
     }
     
-    // Transfer shares from old nodes to new holding committee
-    for (const newHolderId of newHolderIds) {
+    // Step 2: Old committee members create sub-shares
+    const subShareMatrix: bigint[][] = []
+    const oldSeatIndices: number[] = []
+    
+    for (const oldNode of oldNodesWithShares) {
+      const subShares = oldNode.createSubShares(newHolderIds.length, this.threshold)
+      subShareMatrix.push(subShares)
+      oldSeatIndices.push(oldNode.getShare()!.x)
+      
+      this.logCallback(`Node ${oldNode.id} created ${subShares.length} sub-shares`, 'info')
+    }
+    
+    // Step 3: Create new nodes
+    this.nodes.clear()
+    for (let i = 1; i <= this.totalNodes; i++) {
+      this.nodes.set(i, new Node(i, this.logCallback))
+    }
+    
+    // Step 4: New committee members compute shares from first t sub-shares
+    const oldIndicesToUse = oldSeatIndices.slice(0, this.threshold)
+    
+    for (let k = 0; k < newHolderIds.length; k++) {
+      const newHolderId = newHolderIds[k]!
       const newNode = this.nodes.get(newHolderId)
       if (!newNode) continue
       
-      // Find an old node that has a share
-      for (const oldNode of oldNodes.values()) {
-        if (oldNode.transferShareTo(newNode)) {
-          transferCount++
-          break
-        }
+      // Collect k-th sub-share from first t old committee members
+      const subSharesForThisSeat: bigint[] = []
+      for (let j = 0; j < this.threshold; j++) {
+        subSharesForThisSeat.push(subShareMatrix[j]![k]!)
       }
+      
+      // Node computes its new share using Lagrange interpolation
+      newNode.computeNewShareFromSubShares(
+        k + 1,  // Seat index: 1, 2, ..., ci+1
+        subSharesForThisSeat,
+        oldIndicesToUse
+      )
     }
     
-    this.logCallback(`${transferCount} shares transferred to new committee`, 'success')
+    this.logCallback(`${newHolderIds.length} new shares created via handover`, 'success')
   }
 
   /**

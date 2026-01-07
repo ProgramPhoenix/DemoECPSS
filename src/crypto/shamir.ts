@@ -8,10 +8,18 @@ export interface Share {
   shareIndex: number
   value: string
   x: number
-  y: bigint 
+  y: bigint
+}
+
+// SubShare ist nur für temporäre Berechnungen während des Handovers
+export interface SubShare {
+  fromSeatIndex: number  // Which previous committee seat this came from
+  value: bigint          // The sub-share value G_j(k)
 }
 
 export class ShamirSecretSharing {
+  // Make PRIME accessible for handover protocol
+  static readonly PRIME = PRIME
   /**
    * Convert a string to a bigint
    */
@@ -112,6 +120,31 @@ export class ShamirSecretSharing {
     }
     
     return oldS < 0n ? oldS + m : oldS
+  }
+
+  /**
+   * Calculate Lagrange coefficient for interpolation at x=0
+   * λ_j = ∏(k≠j) (-x_k) / (x_j - x_k) mod PRIME
+   */
+  static lagrangeCoefficient(xPoints: number[], j: number): bigint {
+    const xj = BigInt(xPoints[j]!)
+    let numerator = 1n
+    let denominator = 1n
+    
+    for (let k = 0; k < xPoints.length; k++) {
+      if (k !== j) {
+        const xk = BigInt(xPoints[k]!)
+        // numerator *= -xk
+        numerator = (numerator * (-xk % PRIME + PRIME)) % PRIME
+        // denominator *= (xj - xk)
+        let diff = (xj - xk) % PRIME
+        if (diff < 0n) diff = (diff + PRIME) % PRIME
+        denominator = (denominator * diff) % PRIME
+      }
+    }
+    
+    // Return numerator * denominator^(-1) mod PRIME
+    return (numerator * this.modInverse(denominator, PRIME)) % PRIME
   }
 
   /**
