@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+@theme {
+  --animate-fade-in-down: fadeInDown 0.7s ease-out forwards;
+  
+  @keyframes fadeInDown {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -12,9 +27,28 @@ body, html {
   width: 100%;
   height: 100%;
   overflow-x: hidden;
+  background-color: #050505; /* Match app background to prevent white flashes */
 }
 
 #app {
   width: 100%;
-  height: 100%;
+  min-height: 100vh;
+}
+
+/* Custom Scrollbar for Terminal */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #111827; 
+}
+
+::-webkit-scrollbar-thumb {
+  background: #374151; 
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563; 
 }

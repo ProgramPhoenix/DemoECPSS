@@ -42,46 +42,43 @@ defineExpose({
 </script>
 
 <template>
-  <div class="w-1/2 h-screen overflow-hidden relative z-10">
-    <!-- Console Content Container - Absolutely positioned to fill entire screen height -->
-    <div class="absolute inset-0 flex flex-col justify-end">
-      <!-- Fade overlay for logs -->
-      <div class="absolute top-0 left-0 right-0 h-full pointer-events-none z-10"
-           style="background: linear-gradient(to bottom, 
-                  rgba(0, 0, 0, 1) 0%, 
-                  rgba(0, 0, 0, 0.98) 5%,
-                  rgba(0, 0, 0, 0.95) 10%,
-                  rgba(0, 0, 0, 0.9) 20%,
-                  rgba(0, 0, 0, 0.8) 30%,
-                  rgba(0, 0, 0, 0.65) 40%,
-                  rgba(0, 0, 0, 0.5) 50%,
-                  rgba(0, 0, 0, 0.35) 60%,
-                  rgba(0, 0, 0, 0.2) 70%,
-                  rgba(0, 0, 0, 0.1) 80%,
-                  rgba(0, 0, 0, 0.03) 90%,
-                  rgba(0, 0, 0, 0) 100%);">
+  <div class="h-full w-full flex flex-col bg-gray-900 border border-gray-700/50 rounded-lg shadow-2xl overflow-hidden backdrop-blur-sm bg-opacity-90">
+    <!-- Terminal Header -->
+    <div class="flex items-center px-4 py-2 bg-gray-800 border-b border-gray-700">
+      <div class="flex space-x-2">
+        <div class="w-3 h-3 rounded-full bg-red-500"></div>
+        <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+        <div class="w-3 h-3 rounded-full bg-green-500"></div>
       </div>
-      
-      <div class="space-y-1 relative z-0 font-mono text-xs sm:text-sm p-4 pb-6 flex flex-col-reverse overflow-y-auto" style="max-height: 100%;">
+      <div class="ml-4 text-xs text-gray-400 font-mono flex-1 text-center">system_logs.sh</div>
+      <div class="w-10"></div> <!-- Spacer for balance -->
+    </div>
+
+    <!-- Console Content -->
+    <div class="flex-1 relative overflow-hidden bg-black/80 font-mono text-xs sm:text-sm p-4">
+       <!-- Fade overlay for top logs -->
+       <div class="absolute top-0 left-0 right-0 h-8 z-10 bg-gradient-to-b from-black/80 to-transparent pointer-events-none"></div>
+
+      <div class="h-full overflow-y-auto flex flex-col-reverse space-y-reverse space-y-1">
+        <!-- Input Line (Simulated) -->
+        <div class="text-cyan-400 opacity-80 mt-2">
+          <span class="mr-2">$</span><span class="animate-pulse">_</span>
+        </div>
+
         <div 
           v-for="(log, index) in logs.slice().reverse()" 
           :key="logs.length - 1 - index"
-          class="transition-opacity duration-500"
+          class="transition-all duration-300 hover:bg-white/5 p-0.5 rounded"
           :class="{
-            'text-cyan-400': log.type === 'info',
-            'text-green-500': log.type === 'success',
-            'text-yellow-500': log.type === 'warning',
-            'text-red-500': log.type === 'error'
+            'text-cyan-300': log.type === 'info',
+            'text-emerald-400': log.type === 'success',
+            'text-amber-400': log.type === 'warning',
+            'text-rose-500': log.type === 'error'
           }"
         >
-          <span 
-            class="text-gray-500"
-            :class="{ 'text-white': logs.length - 1 - index === logs.length - 1 }"
-          >[{{ log.timestamp }}]</span>
-          <span 
-            class="ml-2"
-            :class="{ 'font-bold': logs.length - 1 - index === logs.length - 1 }"
-          >{{ log.message }}</span>
+          <span class="text-gray-600 select-none text-[10px] mr-2">[{{ log.timestamp }}]</span>
+          <span class="mr-2 text-gray-500 select-none">&gt;</span>
+          <span>{{ log.message }}</span>
         </div>
       </div>
     </div>
